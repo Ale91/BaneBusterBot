@@ -10,19 +10,29 @@ import cv2
 
 HEADLESS = False
 
-PROBE = UnitTypeId.PROBE
-NEXUS = UnitTypeId.NEXUS
-PYLON = UnitTypeId.PYLON
-ASSIMILATOR = UnitTypeId.ASSIMILATOR
-GATEWAY = UnitTypeId.GATEWAY
-CYBERNETICSCORE = UnitTypeId.CYBERNETICSCORE
-STALKER = UnitTypeId.STALKER
-VOIDRAY = UnitTypeId.VOIDRAY
-STARGATE = UnitTypeId.STARGATE
-ZEALOT = UnitTypeId.ZEALOT
-ROBOTICSFACILITY = UnitTypeId.ROBOTICSFACILITY
-OBSERVER = UnitTypeId.OBSERVER
-IMMORTAL = UnitTypeId.IMMORTAL
+# PROBE = UnitTypeId.PROBE
+# NEXUS = UnitTypeId.NEXUS
+# PYLON = UnitTypeId.PYLON
+# ASSIMILATOR = UnitTypeId.ASSIMILATOR
+# GATEWAY = UnitTypeId.GATEWAY
+# CYBERNETICSCORE = UnitTypeId.CYBERNETICSCORE
+# STALKER = UnitTypeId.STALKER
+# VOIDRAY = UnitTypeId.VOIDRAY
+# STARGATE = UnitTypeId.STARGATE
+# ZEALOT = UnitTypeId.ZEALOT
+# ROBOTICSFACILITY = UnitTypeId.ROBOTICSFACILITY
+# OBSERVER = UnitTypeId.OBSERVER
+# IMMORTAL = UnitTypeId.IMMORTAL
+DRONE = UnitTypeId.DRONE
+LARVA = UnitTypeId.LARVA
+QUEEN = UnitTypeId.QUEEN
+EXTRACTOR = UnitTypeId.EXTRACTOR
+HATCHERY = UnitTypeId.HATCHERY
+ZERGLING = UnitTypeId.ZERGLING
+BANELING = UnitTypeId.BANELING
+SPAWNING_POOL = UnitTypeId.SPAWNINGPOOL
+BANELINGNEST = UnitTypeId.BANELINGNEST
+OVERLORD = UnitTypeId.OVERLORD
 
 # os.environ["SC2PATH"] = '/starcraftstuff/StarCraftII/'
 
@@ -30,7 +40,6 @@ IMMORTAL = UnitTypeId.IMMORTAL
 class BaneBusterBot(sc2.BotAI):
     def __init__(self, use_model=False):
         self.ITERATIONS_PER_MINUTE = 165
-        self.FIRST_PYLON = True
         self.do_something_after = 0
         self.use_model = use_model
 
@@ -44,8 +53,9 @@ class BaneBusterBot(sc2.BotAI):
         self.iteration = iteration
         await self.distribute_workers()
         await self.build_workers()
-        await self.build_pylons()
-        await self.build_assimilators()
+        await self.build_overlords()
+        await self.build_extractor()
+        await self.inject()
         await self.expand()
         await self.offensive_buildings()
         await self.offensive_force()
@@ -57,15 +67,24 @@ class BaneBusterBot(sc2.BotAI):
         game_data = np.zeros((self.game_info.map_size[1],self.game_info.map_size[0], 3), np.uint8)
         self.game_info.map_size
         draw_dict = {
-            NEXUS: [7, (0, 255, 0)],
-            PYLON: [2, (20, 235, 0)],
-            PROBE: [1, (55, 200, 0)],
-            ASSIMILATOR: [2, (55, 200, 0)],
-            GATEWAY: [3, (200, 100, 0)],
-            CYBERNETICSCORE: [3, (150, 150, 0)],
-            STARGATE: [3, (255, 0, 0)],
-            VOIDRAY: [3, (255, 100, 0)],
-            ROBOTICSFACILITY: [3, (215, 155, 0)],
+            # NEXUS: [7, (0, 255, 0)],
+            # PYLON: [2, (20, 235, 0)],
+            # PROBE: [1, (55, 200, 0)],
+            # ASSIMILATOR: [2, (55, 200, 0)],
+            # GATEWAY: [3, (200, 100, 0)],
+            # CYBERNETICSCORE: [3, (150, 150, 0)],
+            # STARGATE: [3, (255, 0, 0)],
+            # VOIDRAY: [3, (255, 100, 0)],
+            # ROBOTICSFACILITY: [3, (215, 155, 0)],
+            HATCHERY: [7, (0, 255, 0)],
+            OVERLORD: [2, (20, 235, 0)],
+            DRONE: [1, (55, 200, 0)],
+            EXTRACTOR: [2, (55, 200, 0)],
+            SPAWNING_POOL: [3, (200, 100, 0)],
+            BANELINGNEST: [3, (150, 150, 0)],
+            ZERGLING: [3, (255, 100, 0)],
+            QUEEN: [3, (255, 100, 0)],
+            BANELING: [3, (255, 100, 0)],
         }
         for enemy_unit in self.known_enemy_units:
 
@@ -84,9 +103,9 @@ class BaneBusterBot(sc2.BotAI):
                 pos = unit.position
                 cv2.circle(game_data, (int(pos[0]),int(pos[1])), draw_dict[unit_type][0],draw_dict[unit_type][1], -1)
 
-        for obs in self.units(OBSERVER).ready:
-            pos = obs.position
-            cv2.circle(game_data, (int(pos[0]), int(pos[1])), 1, (255, 255, 255), -1)
+        # for obs in self.units(OBSERVER).ready:
+        #     pos = obs.position
+        #     cv2.circle(game_data, (int(pos[0]), int(pos[1])), 1, (255, 255, 255), -1)
 
         line_max = 50
         mineral_ratio = self.minerals / 1500
@@ -103,7 +122,7 @@ class BaneBusterBot(sc2.BotAI):
 
         plausible_supply = self.supply_cap / 200.0
 
-        military_weight = len(self.units(ZEALOT)) / (self.supply_cap-self.supply_left)+1
+        military_weight = len(self.units(ZERGLING))+len(self.units(BANELING)) / (self.supply_cap-self.supply_left)+1
         if military_weight > 1.0:
             military_weight = 1.0
 
@@ -124,39 +143,53 @@ class BaneBusterBot(sc2.BotAI):
         cv2.imshow('Intel', resized)
         cv2.waitKey(1)
 
+    def check_overlords(self):
+        if (len(self.units(OVERLORD)) == 0) and (len(self.units(DRONE)) > 12):
+            return False
+        elif (len(self.units(OVERLORD)) == 1) and (len(self.units(DRONE)) > 18):
+            return False
+        else:
+            return True
+        #TODO
 
+    async def build_units(self):
+        #for hatchery in self.units(HATCHERY).ready.noqueue:
+        if len(self.units(LARVA)) > 0:
+            if (len(self.units(DRONE)) < 19) and self.check_overlords():
+                if self.can_afford(self, DRONE):
+                    if self.supply_left > 0:
+                        await self.do(LARVA.random.train(DRONE))
+            if len(self.units(DRONE)) > 8:
 
-    async def build_workers(self):
-        for nexus in self.units(NEXUS).ready.noqueue:
-            if self.can_afford(PROBE) and len(self.units(PROBE)) < 60:
-                if len(self.units(PROBE)) < self.units(NEXUS).amount*22:
-                    await self.do(nexus.train(PROBE))
+        #if self.can_afford(PROBE) and len(self.units(PROBE)) < 60:
+            #if len(self.units(PROBE)) < self.units(NEXUS).amount*22:
+                #await self.do(nexus.train(PROBE))
 
-    async def build_pylons(self):
-        if self.supply_left < 5 and not self.already_pending(PYLON):
-            nexuses = self.units(NEXUS).ready
-            if nexuses.exists:
-                if self.can_afford(PYLON):
-                    if self.FIRST_PYLON:
-                        await self.build(PYLON, near=nexuses.first, placement_step=7)
-                        self.FIRST_PYLON = False
-                    else:
-                        await self.build(PYLON, near=self.units(PYLON).random, placement_step=5)
+    # async def build_overlords(self):
+    #     if self.supply_left < 5 and not self.already_pending(PYLON):
+    #         nexuses = self.units(NEXUS).ready
+    #         if nexuses.exists:
+    #             if self.can_afford(PYLON):
+    #                 if self.FIRST_PYLON:
+    #                     await self.build(PYLON, near=nexuses.first, placement_step=7)
+    #                     self.FIRST_PYLON = False
+    #                 else:
+    #                     await self.build(PYLON, near=self.units(PYLON).random, placement_step=5)
+    #
+    #     if len(self.units(GATEWAY).ready) > 3 and self.supply_left < 13 and len(self.units(PYLON).not_ready) <2:
+    #                 await self.build(PYLON, near=self.units(PYLON).random, placement_step=5)
+    #     if len(self.units(GATEWAY).ready) > 6 and self.supply_left < 20 and len(self.units(PYLON).not_ready) <3:
+    #                 await self.build(PYLON, near=self.units(PYLON).random, placement_step=5)
 
-        if len(self.units(GATEWAY).ready) > 3 and self.supply_left < 13 and len(self.units(PYLON).not_ready) <2:
-                    await self.build(PYLON, near=self.units(PYLON).random, placement_step=5)
-        if len(self.units(GATEWAY).ready) > 6 and self.supply_left < 20 and len(self.units(PYLON).not_ready) <3:
-                    await self.build(PYLON, near=self.units(PYLON).random, placement_step=5)
+    async def inject(self):
+        for queen in self.units(QUEEN).ready:
+            abilities = await self.get_available_abilities(queen)
+            if queen.energy > 50:
+                if AbilityId.EFFECT_INJECTLARVA in abilities:
+                    if not HATCHERY.has_buff(BuffId.):
+                        await self.do(queen(AbilityId.EFFECT_CHRONOBOOSTENERGYCOST, nexus))
 
-    async def chronoboost(self):
-        for nexus in self.units(NEXUS).ready:
-            abilities = await self.get_available_abilities(nexus)
-            if nexus.energy > 50:
-                if AbilityId.EFFECT_CHRONOBOOSTENERGYCOST in abilities:
-                    if not nexus.has_buff(BuffId.CHRONOBOOSTENERGYCOST):
-                        await self.do(nexus(AbilityId.EFFECT_CHRONOBOOSTENERGYCOST, nexus))
-
-    async def build_assimilators(self):
+    async def build_extractor(self):
         for nexus in self.units(NEXUS).ready:
             vaspenes = self.state.vespene_geyser.closer_than(10.0, nexus)
             for vaspene in vaspenes:
@@ -188,12 +221,12 @@ class BaneBusterBot(sc2.BotAI):
                     if self.can_afford(ROBOTICSFACILITY) and not self.already_pending(ROBOTICSFACILITY):
                         await self.build(ROBOTICSFACILITY, near=pylon)
 
-    async def offensive_force(self):
-        for gw in self.units(GATEWAY).ready.noqueue :
-            if (self.can_afford(STALKER) and self.supply_left > 1) and (not self.units(STALKER).amount > self.units(ZEALOT).amount):
-                await self.do(gw.train(STALKER))
-            if (self.can_afford(ZEALOT) and self.supply_left > 1) and (not self.units(ZEALOT).amount > self.units(STALKER).amount+2):
-                await self.do(gw.train(ZEALOT))
+    # async def offensive_force(self):
+        # for larvae in self.units(L).ready.noqueue :
+        #     if (self.can_afford(STALKER) and self.supply_left > 1) and (not self.units(STALKER).amount > self.units(ZEALOT).amount):
+        #         await self.do(gw.train(STALKER))
+        #     if (self.can_afford(ZEALOT) and self.supply_left > 1) and (not self.units(ZEALOT).amount > self.units(STALKER).amount+2):
+        #         await self.do(gw.train(ZEALOT))
 
     def find_target(self, state):
         if len(self.known_enemy_units) > 0:
