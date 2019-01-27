@@ -21,8 +21,10 @@ BANELING = UnitTypeId.BANELING
 SPAWNING_POOL = UnitTypeId.SPAWNINGPOOL
 BANELINGNEST = UnitTypeId.BANELINGNEST
 OVERLORD = UnitTypeId.OVERLORD
+METABOLICBOOST = UpgradeId.ZERGLINGMOVEMENTSPEED
 
-os.environ["SC2PATH"] = '/Data/StarCraftII/'
+os.environ["SC2PATH"] = '~/Data/StarCraftII/'
+# os.environ["SC2PATH"] = '~/Games/starcraft-ii/drive_c/Program Files (x86)/StarCraft II/'
 
 
 class BaneBusterBot(sc2.BotAI):
@@ -30,6 +32,9 @@ class BaneBusterBot(sc2.BotAI):
         self.ITERATIONS_PER_MINUTE = 165
         self.do_something_after = 0
         self.use_model = use_model
+        self.extractor_made = False
+        self.metabolic_boost_started = False
+        self.first_ov_done = False
 
         self.train_data = []
 
@@ -43,8 +48,6 @@ class BaneBusterBot(sc2.BotAI):
         await self.build_units()
         await self.build_buildings()
         await self.inject()
-        await self.expand()
-        await self.offensive_buildings()
         await self.attack()
         await self.intel()
         # await self.scout()
@@ -121,13 +124,13 @@ class BaneBusterBot(sc2.BotAI):
         cv2.waitKey(1)
 
     def need_overlords(self):
-        if (len(self.units(OVERLORD)) == 1) and (len(self.units(DRONE)) == 12):
+        if (len(self.units(OVERLORD)) == 1) and (self.supply_used == 13) and not self.first_ov_done:
             return True
         elif (len(self.units(OVERLORD)) == 2) and (len(self.units(DRONE)) == 19):
             return True
         elif (len(self.units(OVERLORD)) == 3) and (len(self.units(DRONE)) == 19) and (len(self.units(SPAWNING_POOL).ready) == 0):
             return True
-        elif (self.supply_left() < 3) and (len(self.units(OVERLORD).not_ready) == 0) and (len(self.units(DRONE)) > 12):
+        elif (self.supply_left < 3) and (len(self.units(OVERLORD).not_ready) == 0) and (len(self.units(DRONE)) > 18):
             return True
         else:
             return False
@@ -138,22 +141,25 @@ class BaneBusterBot(sc2.BotAI):
                 if self.can_afford(QUEEN):
                     await self.do(hatchery.train(QUEEN))
         if len(self.units(LARVA)) > 0:
-            if (len(self.units(DRONE)) < 19) and not self.need_overlords():
-                if self.can_afford(self, DRONE):
+            if (len(self.units(DRONE)) < 18) and not self.need_overlords():
+                if self.can_afford(DRONE):
                     if self.supply_left > 0:
-                        await self.do(LARVA.random.train(DRONE))
+                        await self.do(self.units(LARVA).random.train(DRONE))
+                        print("DRONE")
             if self.need_overlords():
                 if self.can_afford(OVERLORD):
-                    await self.do(LARVA.random.train(OVERLORD))
+                    await self.do(self.units(LARVA).random.train(OVERLORD))
+                    print("OVERLORD")
+                    self.first_ov_done = True
             else:
                 if self.units(SPAWNING_POOL).exists:
                     if self.can_afford(ZERGLING):
-                        await self.do(LARVA.random.train(ZERGLING))
+                        await self.do(self.units(LARVA).random.train(ZERGLING))
 
     async def inject(self):
         for queen in self.units(QUEEN).ready.idle:
             abilities = await self.get_available_abilities(queen)
-            if queen.energy > 50:
+            if queen.energy > 25:
                 if AbilityId.EFFECT_INJECTLARVA in abilities:
                     # if not HATCHERY.has_buff(BuffId.):
                     await self.do(queen(AbilityId.EFFECT_INJECTLARVA, self.units(HATCHERY).ready.closest_to(queen)))
@@ -165,15 +171,32 @@ class BaneBusterBot(sc2.BotAI):
                 await self.expand_now() #TODO send drone before 300 minerals
         # Extractor
         if len(self.units(HATCHERY)) > 1:
-            if not self.units(EXTRACTOR).exists:
+            if not self.units(EXTRACTOR).exists and not self.extractor_made:
                 if self.can_afford(EXTRACTOR):
-                    vespene = self.state.vespene_geyser.closer_than(10.0, self.units(HATCHERY).first).first
-                    worker = self.select_build_worker(vespene.position)
-                    await self.do(worker.build(EXTRACTOR),vespene)
+                    vespene = self.state.vespene_geyser.closest_to(self.units(HATCHERY).ready.first)
+                    if await self.can_place(EXTRACTOR,vespene.position):
+                        drone = self.units(DRONE).closest_to(vespene.position)
+                        await self.do(drone.build(EXTRACTOR,vespene))
+                        self.extractor_made = True
         # Spawning Pool
-        if (len(self.units(HATCHERY)) > 1) and self.units(EXTRACTOR).exists:
-            if self.can_afford(SPAWNING_POOL):
-                await self.do(self.units(DRONE).random.build(SPAWNING_POOL, near=self.units(HATCHERY).first))
+        if not self.units(SPAWNING_POOL).exists:
+            if (len(self.units(HATCHERY)) > 1) and self.units(EXTRACTOR).exists:
+                if self.can_afford(SPAWNING_POOL):
+                    for d in range(4, 15):
+                        pos = self.units(HATCHERY).first.position.to2.towards(self.game_info.map_center, d)
+                        if await self.can_place(SPAWNING_POOL, pos):
+                            drone = self.workers.closest_to(pos)
+                            await self.do(drone.build(SPAWNING_POOL, pos))
+                            print("SPAWNINGPOOL ")
+                            with open("log.txt", "a") as f:
+                                if self.use_model:
+                                    f.write("spawned spawning pool")
+        #Metabolic Boost
+        if self.units(SPAWNING_POOL).ready.exists and self.can_afford(METABOLICBOOST):
+            if not self.metabolic_boost_started:
+                await self.do(self.units(SPAWNING_POOL).ready.first.research(METABOLICBOOST))
+                self.metabolic_boost_started = True
+
 
     def find_target(self, state):  # TODO update target while not idle to attack units first
         if len(self.known_enemy_units) > 0:
@@ -226,7 +249,7 @@ class BaneBusterBot(sc2.BotAI):
             #     y[choice] = 1
             #     print(y)
             #     self.train_data.append([y, self.flipped])
-        if self.units(ZERGLING).idle.amount+self.units(BANELING).idle.amount > 5:
+        if self.units(ZERGLING).idle.amount+self.units(BANELING).idle.amount > 15:
                 for z in self.units(ZERGLING).idle+self.units(BANELING).idle:
                     await self.do(z.attack(self.find_target(self.state)))
         # if self.units(STALKER).amount+self.units(ZEALOT).amount > 5:
@@ -272,12 +295,12 @@ class BaneBusterBot(sc2.BotAI):
             else:
                 f.write("Random {}\n".format(game_result))
 
-        if game_result == sc2.Result.Victory:
-            np.save("train_data/{}.npy".format(str(int(time.time()))), np.array(self.train_data))
+        # if game_result == sc2.Result.Victory:
+        #     np.save("train_data/{}.npy".format(str(int(time.time()))), np.array(self.train_data))
 
 
 run_game(maps.get("CatalystLE"), [
     # Human(Race.Terran),
     Bot(Race.Zerg, BaneBusterBot(use_model=False)),
     Computer(Race.Terran, Difficulty.Hard),
-    ], realtime=True)
+    ], realtime=False, save_replay_as="lastReplay.SC2Replay")
