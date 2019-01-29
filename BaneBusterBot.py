@@ -35,6 +35,8 @@ class BaneBusterBot(sc2.BotAI):
         self.extractor_made = False
         self.metabolic_boost_started = False
         self.first_ov_done = False
+        self.army_role = 'defense'
+        self.drone_sent = False
 
         self.train_data = []
 
@@ -50,7 +52,6 @@ class BaneBusterBot(sc2.BotAI):
         await self.inject()
         await self.attack()
         await self.intel()
-        # await self.scout()
 
     async def intel(self):
         game_data = np.zeros((self.game_info.map_size[1],self.game_info.map_size[0], 3), np.uint8)
@@ -62,9 +63,9 @@ class BaneBusterBot(sc2.BotAI):
             EXTRACTOR: [2, (55, 200, 0)],
             SPAWNING_POOL: [3, (200, 100, 0)],
             BANELINGNEST: [3, (150, 150, 0)],
-            ZERGLING: [3, (255, 100, 0)],
+            ZERGLING: [2, (255, 100, 0)],
             QUEEN: [3, (255, 100, 0)],
-            BANELING: [3, (255, 100, 0)],
+            BANELING: [2, (255, 100, 0)],
         }
         for enemy_unit in self.known_enemy_units:
 
@@ -137,7 +138,7 @@ class BaneBusterBot(sc2.BotAI):
 
     async def build_units(self):
         for hatchery in self.units(HATCHERY).ready.noqueue:
-            if (len(self.units(QUEEN)) < 2) and self.units(SPAWNING_POOL).ready.exists:
+            if (len(self.units(QUEEN)) < 1) and self.units(SPAWNING_POOL).ready.exists:
                 if self.can_afford(QUEEN):
                     await self.do(hatchery.train(QUEEN))
         if len(self.units(LARVA)) > 0:
@@ -152,7 +153,7 @@ class BaneBusterBot(sc2.BotAI):
                     print("OVERLORD")
                     self.first_ov_done = True
             else:
-                if self.units(SPAWNING_POOL).exists:
+                if self.units(SPAWNING_POOL).ready.exists:
                     if self.can_afford(ZERGLING):
                         await self.do(self.units(LARVA).random.train(ZERGLING))
 
@@ -161,12 +162,15 @@ class BaneBusterBot(sc2.BotAI):
             abilities = await self.get_available_abilities(queen)
             if queen.energy > 25:
                 if AbilityId.EFFECT_INJECTLARVA in abilities:
-                    # if not HATCHERY.has_buff(BuffId.):
                     await self.do(queen(AbilityId.EFFECT_INJECTLARVA, self.units(HATCHERY).ready.closest_to(queen)))
 
     async def build_buildings(self):
         # 2nd base
-        if ((len(self.units(HATCHERY)) < 2)):
+        if self.minerals > 175 and not self.drone_sent:
+            bases = list(self.expansion_locations.keys())
+            self.units(OVERLORD).first.move(bases[1])
+            self.drone_sent = True
+        if (len(self.units(HATCHERY)) < 2):
             if self.can_afford(HATCHERY):
                 await self.expand_now() #TODO send drone before 300 minerals
         # Extractor
@@ -199,91 +203,29 @@ class BaneBusterBot(sc2.BotAI):
 
 
     def find_target(self, state):  # TODO update target while not idle to attack units first
-        if len(self.known_enemy_units) > 0:
-            return random.choice(self.known_enemy_units)
-        elif len(self.known_enemy_structures) > 0:
-            return random.choice(self.known_enemy_structures)
-        else:
-            return self.enemy_start_locations[0]
+        # if len(self.known_enemy_units) > 0:
+        #     return random.choice(self.known_enemy_units)
+        # elif len(self.known_enemy_structures) > 0:
+        #     return random.choice(self.known_enemy_structures)
+        # else:
+        #     return self.enemy_start_locations[0]
+        return self.enemy_start_locations[0]
 
-    async def attack(self):
-        # if len(self.units(ZEALOT).idle)+len(self.units(STALKER).idle) > 0:
-        #     target = False
-            # if self.iteration > self.do_something_after:
-            #     if self.use_model:
-            #         prediction = self.model.predict([self.flipped.reshape([-1, 176, 200, 3])])
-            #         choice = np.argmax(prediction[0])
-            #         # print('prediction: ',choice)
-            #
-            #         choice_dict = {0: "No Attack!",
-            #                        1: "Attack close to our nexus!",
-            #                        2: "Attack Enemy Structure!",
-            #                        3: "Attack Eneemy Start!"}
-            #
-            #         print("Choice #{}:{}".format(choice, choice_dict[choice]))
-            #     else:
-            #         choice = random.randrange(0, 4)
-            #     if choice == 0:
-            #         # no attack
-            #         wait = random.randrange(20, 165)
-            #         self.do_something_after = self.iteration + wait
-            #
-            #     elif choice == 1:
-            #         # attack_unit_closest_nexus
-            #         if len(self.known_enemy_units) > 0:
-            #             target = self.known_enemy_units.closest_to(random.choice(self.units(NEXUS)))
-            #
-            #     elif choice == 2:
-            #         # attack enemy structures
-            #         if len(self.known_enemy_structures) > 0:
-            #             target = random.choice(self.known_enemy_structures)
-            #
-            #     elif choice == 3:
-            #         # attack_enemy_start
-            #         target = self.enemy_start_locations[0]
-            #
-            #     if target:
-            #         for vr in self.units(ZEALOT).idle+self.units(STALKER).idle:
-            #             await self.do(vr.attack(target))
-            #     y = np.zeros(4)
-            #     y[choice] = 1
-            #     print(y)
-            #     self.train_data.append([y, self.flipped])
-        if self.units(ZERGLING).idle.amount+self.units(BANELING).idle.amount > 15:
-                for z in self.units(ZERGLING).idle+self.units(BANELING).idle:
-                    await self.do(z.attack(self.find_target(self.state)))
-        # if self.units(STALKER).amount+self.units(ZEALOT).amount > 5:
-        #     if len(self.known_enemy_units) > 0:
-        #         for s in self.units(STALKER).idle+self.units(ZEALOT).idle:
-        #             await self.do(s.attack(random.choice(self.known_enemy_units)))
+    async def attack(self): # TODO BANELINGS
+        if self.units(ZERGLING).idle.exists:
+            close_idles = self.units(ZERGLING).idle.closer_than(8, self.units(ZERGLING).idle.center)
+            if close_idles.amount > 15:
+                for x in close_idles:
+                    await self.do(x.attack(self.find_target(self.state)))
+            far_idles = self.units(ZERGLING).idle.further_than(8, self.units(ZERGLING).idle.center)
+            for z in far_idles:
+                if (self.units(ZERGLING) - self.units(ZERGLING).idle).exists:
+                    await self.do(z.move((self.units(ZERGLING) - self.units(ZERGLING).idle).center))
+                else:
+                    await self.do(z.move(self.units(ZERGLING).center))
 
-    # async def scout(self):
-    #     if len(self.units(OVERLORD)) > 0:
-    #         scout = self.units(OVERLORD)[0]
-    #         if scout.is_idle:
-    #             enemy_location = self.enemy_start_locations[0]
-    #             move_to = self.random_location_variance(enemy_location)
-    #             print(move_to)
-    #             await self.do(scout.move(move_to))
 
-    def random_location_variance(self, enemy_start_location):
-        x = enemy_start_location[0]
-        y = enemy_start_location[1]
-
-        x += ((random.randrange(-20, 20)) / 100) * enemy_start_location[0]
-        y += ((random.randrange(-20, 20)) / 100) * enemy_start_location[1]
-
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-        if x > self.game_info.map_size[0]:
-            x = self.game_info.map_size[0]
-        if y > self.game_info.map_size[1]:
-            y = self.game_info.map_size[1]
-
-        go_to = position.Point2(position.Pointlike((x, y)))
-        return go_to
+        # TODO ATTACK MODEL
 
     def on_end(self, game_result):
         print('--- on_end called ---')
@@ -302,5 +244,5 @@ class BaneBusterBot(sc2.BotAI):
 run_game(maps.get("CatalystLE"), [
     # Human(Race.Terran),
     Bot(Race.Zerg, BaneBusterBot(use_model=False)),
-    Computer(Race.Terran, Difficulty.Hard),
+    Computer(Race.Terran, Difficulty.CheatInsane),
     ], realtime=False, save_replay_as="lastReplay.SC2Replay")
